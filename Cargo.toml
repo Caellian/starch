@@ -1,0 +1,29 @@
+[package]
+name = "starch"
+description = "Glue boilerplate code for shader subprojects."
+authors = ["Tin Švagelj <tin.svagelj@live.com>"]
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["glsl-in", "spv-out"]
+glsl-in = ["naga/glsl-in", "naga/glsl-validate"]
+glsl-out = ["naga/glsl-out"]
+wgsl-in = ["naga/wgsl-in"]
+wgsl-out = ["naga/wgsl-out"]
+spv-in = ["naga/spv-in"]
+spv-out = ["naga/spv-out", "byteorder"]
+hlsl-out = ["naga/hlsl-out"]
+config-file = ["serde", "naga/serialize", "naga/deserialize"]
+
+[dependencies]
+naga = "0.8"
+regex = "1"
+byteorder = { version = "1.4", optional = true }
+
+serde = { version = "1.0", optional = true, features = [ "derive" ] }
+
+thiserror = "1.0"
+log = "0.4"
+
+lazy_static = "1.4"
