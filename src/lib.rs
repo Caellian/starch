@@ -1,26 +1,23 @@
-pub mod codegen;
 pub mod config;
 pub mod error;
+pub mod language;
 pub mod preprocess;
 pub mod shader;
-pub mod transpile;
 pub(crate) mod util;
-pub mod wgsl;
 
 pub mod prelude {
     pub use super::config::Config as StarchConfig;
+    pub use super::language::transpile::*;
     pub use super::preprocess::preprocess_shader;
     pub use super::shader::*;
-    pub use super::transpile::*;
 }
 
 #[cfg(test)]
 mod tests {
     use super::prelude::*;
-    use crate::codegen::GenerateSources;
+    use crate::codegen::{CodegenData, GenerateSources};
     use crate::config::Config;
     use log::LevelFilter;
-    use std::path::Path;
 
     #[test]
     fn full_test() {
@@ -31,7 +28,7 @@ mod tests {
         let config = Config::init("./shaders");
 
         let shaders = Shader::load_shaders(&config);
-        let result: TranspileStatus = shaders.transpile(&config).unwrap();
+        let result: CodegenData = shaders.transpile(&config).unwrap();
         result.generate_sources(&config);
     }
 }

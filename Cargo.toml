@@ -6,14 +6,19 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["glsl-in", "spv-out"]
+default = ["wgsl-in", "glsl-out"]
+glsl = ["glsl-in", "glsl-out"]
 glsl-in = ["naga/glsl-in", "naga/glsl-validate"]
 glsl-out = ["naga/glsl-out"]
+wgsl = ["wgsl-in", "wgsl-out"]
 wgsl-in = ["naga/wgsl-in"]
 wgsl-out = ["naga/wgsl-out"]
+spv = ["spv-in", "spv-out"]
 spv-in = ["naga/spv-in"]
 spv-out = ["naga/spv-out", "byteorder"]
 hlsl-out = ["naga/hlsl-out"]
+msl-out = [ "naga/msl-out"]
+all-formats = ["glsl", "wgsl", "spv", "hlsl-out", "msl-out"]
 config-file = ["serde", "naga/serialize", "naga/deserialize"]
 
 [dependencies]

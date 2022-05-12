@@ -39,7 +39,7 @@ fn collect_files_impl<F: Fn(&Path) -> bool>(
         if let Ok(dir_entry) = entry_result {
             let sub_path = dir_entry.path();
 
-            if sub_path.is_dir() {
+            if sub_path.is_dir() && (&filter)(&sub_path) {
                 result.append(&mut collect_files_impl(root.as_ref(), &sub_path, filter));
                 continue;
             } else if !sub_path.is_file() || !(&filter)(&sub_path) {

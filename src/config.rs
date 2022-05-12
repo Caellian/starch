@@ -1,4 +1,4 @@
-use crate::transpile::Language;
+use crate::prelude::ShaderLanguage;
 use naga::valid::{Capabilities, ValidationFlags};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub struct Config {
     pub out: PathBuf,
     pub generated: PathBuf,
 
-    pub targets: Vec<Language>,
+    pub targets: Vec<ShaderLanguage>,
     pub validation_flags: ValidationFlags,
     pub capabilities: Capabilities,
 }
@@ -47,28 +47,34 @@ impl Default for Config {
 impl Config {
     pub fn init(root: impl AsRef<Path>) -> Config {
         #[cfg(feature = "config-file")]
-        let local = Some(Config::load_from_file(&root.as_ref().join("starch.yml")));
+        let local: Option<Config> =
+            Config::load_from_file(&root.as_ref().join("starch.yml"));
         #[cfg(not(feature = "config-file"))]
-        let local = None;
+        let local: Option<Config> = None;
 
         path_field!(src, local, "STARCH_SHADER_SRC", root, "src/");
         path_field!(out, local, "STARCH_SHADER_OUT", root, "src/gen/");
-        path_field!(
-            generated,
-            local,
-            "STARCH_SHADER_GEN",
-            root,
-            "src/generated.rs"
-        );
+        path_field!(generated, local, "STARCH_SHADER_GEN", root, "src/lib.rs");
 
         let targets = env_var_list("STARCH_SHADER_TARGETS")
             .map(|env| {
                 env.into_iter()
-                    .filter_map(|text| Language::from_str(&text))
+                    .filter_map(|text| ShaderLanguage::from_str(&text))
                     .collect()
             })
             .or(local.as_ref().map(|l| l.targets.clone()))
-            .unwrap_or(vec![Language::GLSL]);
+            .unwrap_or(vec![
+                #[cfg(feature = "spv-out")]
+                ShaderLanguage::SPV,
+                #[cfg(feature = "glsl-out")]
+                ShaderLanguage::GLSL,
+                #[cfg(feature = "hlsl-out")]
+                ShaderLanguage::HLSL,
+                #[cfg(feature = "wgsl-out")]
+                ShaderLanguage::WGSL,
+                #[cfg(feature = "msl-out")]
+                ShaderLanguage::MSL,
+            ]);
 
         let validation_flags = std::env::var("STARCH_SHADER_VALIDATION")
             .ok()

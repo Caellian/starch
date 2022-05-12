@@ -1,6 +1,6 @@
 use crate::config::Config;
+use crate::prelude::ShaderLanguage;
 use crate::preprocess;
-use crate::transpile::Language;
 use crate::util::{collect_files, PathExt};
 use naga::valid::{ModuleInfo, Validator};
 use naga::{Module, ShaderStage};
@@ -120,7 +120,7 @@ impl ShaderCode {
 #[derive(Debug)]
 pub struct Shader {
     pub path: PathBuf,
-    pub lang: Language,
+    pub lang: ShaderLanguage,
     pub source_stage: Option<ShaderStage>,
     pub source: Option<ShaderCode>,
 
@@ -132,7 +132,7 @@ impl Shader {
     pub fn new(path: impl AsRef<Path>) -> Option<Shader> {
         Some(Shader {
             path: path.as_ref().to_path_buf(),
-            lang: Language::from_file_name(path.as_ref())?,
+            lang: ShaderLanguage::from_file_name(path.as_ref())?,
             source_stage: stage_from_name(path.as_ref()),
             source: None,
 
@@ -142,10 +142,16 @@ impl Shader {
     }
 
     fn collect(config: &Config) -> Vec<Shader> {
-        collect_files(&config.src, |name| Language::from_file_name(name).is_some())
-            .into_iter()
-            .filter_map(|path| Shader::new(path))
-            .collect()
+        collect_files(&config.src, |c| {
+            if c.is_dir() {
+                Some(c.to_path_buf()) != config.out.canonicalize().ok()
+            } else {
+                ShaderLanguage::from_file_name(c).is_some()
+            }
+        })
+        .into_iter()
+        .filter_map(|path| Shader::new(path))
+        .collect()
     }
 
     pub fn load_shaders(config: &Config) -> Vec<Shader> {

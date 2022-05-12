@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum TranspileError<'a> {
     #[error("shader has no entry point")]
     NoEntryPoint,
+    #[error("source file transpilation not supported")]
+    SourceNotSupported,
     #[error("requested transpilation target not supported")]
     TargetNotSupported,
 
@@ -35,5 +37,5 @@ pub enum TranspileError<'a> {
 
     #[cfg(not(feature = "wgsl-in"))]
     #[error("")]
-    _Phantom(&'a ())
+    _Phantom(&'a ()),
 }
