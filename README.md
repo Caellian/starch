@@ -6,6 +6,8 @@ Glue boilerplate code for shader subprojects based on [naga](https://github.com/
 
 - [x] Transpile shaders at compile time with naga
 - [x] Generate sources containing shader sources as static constants.
+- [ ] Shader preprocessor
+  - [ ] Include statements
 - [ ] Runtime shader configuration
 
 ## License

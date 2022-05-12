@@ -4,6 +4,7 @@ use crate::language::codegen::CodegenData;
 use crate::shader::{Shader, ShaderCode};
 #[allow(unused_imports)]
 use crate::util::LogResult;
+use crate::util::Name;
 use naga::{EntryPoint, Module, ShaderStage};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,10 @@ pub enum ShaderLanguage {
 }
 
 impl ShaderLanguage {
-    pub const ALL: &'static [ShaderLanguage] = &[
+    // I swear there's a macro that does most of this...
+    pub const COUNT: usize = 5;
+
+    pub const ALL: [ShaderLanguage; ShaderLanguage::COUNT] = [
         ShaderLanguage::WGSL,
         ShaderLanguage::GLSL,
         ShaderLanguage::SPV,
@@ -286,25 +290,43 @@ pub struct ResultInFile {
     pub path: PathBuf,
 }
 
-#[derive(Debug)]
-pub struct ResultFile {
+#[derive(Debug, Hash)]
+pub struct ShaderFile {
     pub language: ShaderLanguage,
     pub path: PathBuf,
     pub stage: Option<ShaderStage>,
 }
 
+impl PartialEq for ShaderFile {
+    fn eq(&self, other: &Self) -> bool {
+        let this_path = match self.path.canonicalize() {
+            Ok(it) => it,
+            Err(_) => return false,
+        };
+        let other_path = match other.path.canonicalize() {
+            Ok(it) => it,
+            Err(_) => return false,
+        };
+
+        this_path == other_path && self.stage != other.stage
+    }
+}
+impl Eq for ShaderFile {}
+
 pub trait Transpile {
-    fn transpile<'a>(
+    fn transpile_and_write<'a>(
         &self,
         config: &'a Config,
     ) -> Result<CodegenData, TranspileError<'a>>;
 }
 
 impl Transpile for Shader {
-    fn transpile<'a>(
+    fn transpile_and_write<'a>(
         &self,
         config: &'a Config,
     ) -> Result<CodegenData, TranspileError<'a>> {
+        let module = self.module.as_ref().expect("shader module must exist");
+
         let mut result = CodegenData::default();
 
         log::info!("Transpiling: {:?}", &self.path);
@@ -312,9 +334,9 @@ impl Transpile for Shader {
             .ok_or(TranspileError::SourceNotSupported)?;
         log::info!("Detected language: {}", source_lang);
 
-        result.register_result(
+        result.register_source(
             source_lang,
-            ResultFile {
+            ShaderFile {
                 language: ShaderLanguage::from_file_name(&self.path).unwrap(),
                 path: self.path.to_path_buf(),
                 stage: None,
@@ -322,31 +344,104 @@ impl Transpile for Shader {
         );
 
         for &target in &config.targets {
-            let out_dir = config.out.join(target.to_str());
-            if !out_dir.exists() {
-                std::fs::create_dir_all(&out_dir)?;
-            }
+            let target_dir = &config.out.join(target.to_str());
 
-            let module = self.module.as_ref().expect("shader module must exist");
+            if !target_dir.exists() {
+                std::fs::create_dir(&target_dir)?;
+            }
 
             if module.entry_points.len() > 1 {
                 match target {
                     ShaderLanguage::WGSL | ShaderLanguage::SPV => {
-                        todo!("implement module transpilation")
+                        log::info!("Generating {} module...", target.to_uppercase_str());
+                        let entry_point = &module.entry_points[0];
+
+                        let transpiled =
+                            transpile_entry(self, Some(&entry_point), target)?;
+                        std::fs::write(
+                            &config
+                                .out
+                                .join(target.to_str())
+                                .join(self.path.with_extension(target.get_ext(None))),
+                            transpiled,
+                        )?;
+                        result.register_result(
+                            target,
+                            ShaderFile {
+                                language: target,
+                                stage: None,
+                                path: config
+                                    .out_relative()
+                                    .join(target.to_str())
+                                    .join(self.path.with_extension(target.get_ext(None))),
+                            },
+                        );
                     }
                     ShaderLanguage::GLSL | ShaderLanguage::HLSL | ShaderLanguage::MSL => {
+                        log::info!("Generating {} files...", target.to_uppercase_str());
                         for entry_point in &module.entry_points {
-                            transpile_entry(
-                                self,
-                                &mut result,
-                                Some(entry_point),
-                                target,
-                                config,
+                            log::info!(
+                                "- {} {} shader entry point: {}",
+                                target.to_uppercase_str(),
+                                entry_point.stage.name(),
+                                match &entry_point.function.name {
+                                    Some(s) => s.as_str(),
+                                    None => "<no_function>",
+                                }
+                            );
+                            let transpiled =
+                                transpile_entry(self, Some(entry_point), target)?;
+
+                            std::fs::write(
+                                &target_dir.join(self.path.with_extension(
+                                    target.get_ext(Some(entry_point.stage)),
+                                )),
+                                transpiled,
                             )?;
+
+                            result.register_result(
+                                target,
+                                ShaderFile {
+                                    language: target,
+                                    stage: Some(entry_point.stage),
+                                    path: config
+                                        .out_relative()
+                                        .join(target.to_str())
+                                        .join(self.path.with_extension(
+                                            target.get_ext(Some(entry_point.stage)),
+                                        )),
+                                },
+                            );
                         }
                     }
                 }
+            } else if !module.entry_points.is_empty() {
+                let entry_point = &module.entry_points[0];
+                let transpiled = transpile_entry(self, Some(entry_point), target)?;
+                std::fs::write(
+                    &target_dir.join(
+                        self.path
+                            .with_extension(target.get_ext(Some(entry_point.stage))),
+                    ),
+                    transpiled,
+                )?;
+                result.register_result(
+                    target,
+                    ShaderFile {
+                        language: target,
+                        stage: Some(entry_point.stage),
+                        path: config.out_relative().join(target.to_str()).join(
+                            self.path
+                                .with_extension(target.get_ext(Some(entry_point.stage))),
+                        ),
+                    },
+                );
             } else {
+                log::info!(
+                    "Skipping shader source with no entry points: {}",
+                    self.path.display()
+                );
+                continue;
             }
         }
 
@@ -356,57 +451,45 @@ impl Transpile for Shader {
 
 fn transpile_entry<'a>(
     shader: &Shader,
-    result: &mut CodegenData,
     entry_point: Option<&EntryPoint>,
     target: ShaderLanguage,
-    config: &Config,
-) -> Result<(), TranspileError<'a>> {
+) -> Result<ShaderCode, TranspileError<'a>> {
     let mut transpiled = if target.is_binary() {
         ShaderCode::Binary(Vec::with_capacity(512))
     } else {
         ShaderCode::Text(String::with_capacity(1024))
     };
 
-    let out_relative = {
-        let mut relative = shader.path.clone();
-        relative.set_extension(target.get_ext(entry_point.map(|e| e.stage)));
-        relative
-    };
-
-    let out_file = config.out.join(&out_relative);
-    if out_relative.parent().is_some() && !out_file.parent().unwrap().exists() {
-        std::fs::create_dir_all(out_file.parent().unwrap())?;
-    }
-
     target.generate(shader, &mut transpiled, entry_point)?;
-    std::fs::write(&out_file, transpiled)?;
 
-    let relative_path = config
-        .out_relative()
-        .join(target.to_str())
-        .join(out_relative);
-
-    result.register_result(
-        target,
-        ResultFile {
-            language: target,
-            stage: entry_point.map(|e| e.stage),
-            path: relative_path,
-        },
-    );
-
-    Ok(())
+    Ok(transpiled)
 }
 
 impl Transpile for Vec<Shader> {
-    fn transpile<'a>(
+    fn transpile_and_write<'a>(
         &self,
         config: &'a Config,
     ) -> Result<CodegenData, TranspileError<'a>> {
         let mut result = CodegenData::default();
 
+        // Remove previously generated files
+        if config.out.exists() {
+            log::info!("Removing old generated files...");
+            std::fs::remove_dir_all(&config.out)?;
+            std::fs::create_dir_all(&config.out)?;
+        }
         for shader in self {
-            result += shader.transpile(config)?;
+            match shader.transpile_and_write(config) {
+                Ok(data) => result += data,
+                Err(err) => {
+                    log::error!(
+                        "Encountered errors while transpiling: {}\n{}",
+                        shader.path.display(),
+                        err
+                    );
+                    Err(err)?
+                }
+            };
         }
 
         Ok(result)

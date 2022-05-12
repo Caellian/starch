@@ -1,5 +1,37 @@
+use naga::ShaderStage;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+
+fn os_str_as_u8_slice(s: &OsStr) -> &[u8] {
+    unsafe { &*(s as *const OsStr as *const [u8]) }
+}
+unsafe fn u8_slice_as_os_str(s: &[u8]) -> &OsStr {
+    // SAFETY: see the comment of `os_str_as_u8_slice`
+    &*(s as *const [u8] as *const OsStr)
+}
+
+fn split_file_at_dot(file: &OsStr) -> (&OsStr, Option<&OsStr>) {
+    let slice = os_str_as_u8_slice(file);
+    if slice == b".." {
+        return (file, None);
+    }
+
+    let i = match slice[1..].iter().position(|b| *b == b'.') {
+        Some(i) => i + 1,
+        None => return (file, None),
+    };
+    let before = &slice[..i];
+    let after = &slice[i + 1..];
+    unsafe { (u8_slice_as_os_str(before), Some(u8_slice_as_os_str(after))) }
+}
+
+// TODO: Remove once path_file_prefix is stable.
+pub fn file_prefix<'a>(path: &'a Path) -> Option<&'a OsStr> {
+    path.file_name()
+        .map(split_file_at_dot)
+        .and_then(|(before, _after)| Some(before))
+}
 
 pub trait PathExt {
     fn long_ext(&self) -> Option<&str>;
@@ -7,8 +39,22 @@ pub trait PathExt {
 
 impl<T: AsRef<Path>> PathExt for T {
     fn long_ext(&self) -> Option<&str> {
-        let start = self.as_ref().file_stem()?.len() + 1;
+        let start = file_prefix(self.as_ref())?.len() + 1;
         Some(&self.as_ref().to_str()?[start..])
+    }
+}
+
+pub trait Name {
+    fn name(&self) -> &'static str;
+}
+
+impl Name for ShaderStage {
+    fn name(&self) -> &'static str {
+        match self {
+            ShaderStage::Vertex => "Vertex",
+            ShaderStage::Fragment => "Fragment",
+            ShaderStage::Compute => "Compute",
+        }
     }
 }
 

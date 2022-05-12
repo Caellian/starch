@@ -27,7 +27,11 @@ mod tests {
         let config = StarchConfig::init("../test");
 
         let shaders = Shader::load_shaders(&config);
-        let result: CodegenData = shaders.transpile(&config).unwrap();
-        result.generate_sources(&config);
+        let result: CodegenData = shaders
+            .transpile_and_write(&config)
+            .expect("couldn't transpile");
+        result
+            .generate_sources(&config)
+            .expect("couldn't generate source files");
     }
 }

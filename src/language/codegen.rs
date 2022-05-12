@@ -1,7 +1,8 @@
 use crate::config::Config;
-use crate::prelude::{ResultFile, ShaderLanguage};
+use crate::prelude::{ShaderFile, ShaderLanguage};
+use crate::util::file_prefix;
 use naga::ShaderStage;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::{Debug, Write};
 use std::io::Error;
 use std::ops::AddAssign;
@@ -29,21 +30,16 @@ pub trait ToStaticStatement {
     fn to_static_statement(&self, c: &mut Context) -> String;
 }
 
-impl ToStaticStatement for ResultFile {
+impl ToStaticStatement for ShaderFile {
     fn to_static_statement(&self, c: &mut Context) -> String {
         let path = self.path.as_path();
 
-        let shader_name = path
-            .file_stem()
+        let shader_name = file_prefix(path)
             .map(|os_str| os_str.to_str())
             .flatten()
             .expect("invalid shader file name");
 
-        let mut name = shader_name.to_ascii_uppercase().replace(".", "_");
-        if let Some(stage) = self.stage {
-            name.push('_');
-            name.push_str(stage_name(stage))
-        }
+        let name = shader_name.to_ascii_uppercase().replace(".", "_");
 
         format_static_statement(name, &self.path, c.indent)
     }
@@ -55,27 +51,28 @@ pub trait GenerateSources {
 
 #[derive(Debug, Default)]
 pub struct CodegenData {
-    pub includes: HashMap<ShaderLanguage, Vec<ResultFile>>,
+    pub sources: [HashSet<ShaderFile>; ShaderLanguage::COUNT],
+    pub includes: [HashSet<ShaderFile>; ShaderLanguage::COUNT],
 }
 
 impl CodegenData {
-    pub fn register_result(&mut self, language: ShaderLanguage, result_file: ResultFile) {
-        match self.includes.get_mut(&language) {
-            Some(it) => (*it).push(result_file),
-            None => {
-                self.includes.insert(language, vec![result_file]);
-            }
-        };
+    pub fn register_source(&mut self, language: ShaderLanguage, result_file: ShaderFile) {
+        self.sources[language as usize].insert(result_file);
+    }
+
+    pub fn register_result(&mut self, language: ShaderLanguage, result_file: ShaderFile) {
+        self.includes[language as usize].insert(result_file);
     }
 }
 
 impl AddAssign for CodegenData {
-    fn add_assign(&mut self, rhs: Self) {
-        for (k, mut v) in rhs.includes {
-            if let Some(it) = self.includes.get_mut(&k) {
-                it.append(&mut v);
-            } else {
-                self.includes.insert(k, v);
+    fn add_assign(&mut self, mut rhs: Self) {
+        for lang in ShaderLanguage::ALL {
+            for shader in rhs.sources[lang as usize].drain() {
+                self.sources[lang as usize].insert(shader);
+            }
+            for shader in rhs.includes[lang as usize].drain() {
+                self.includes[lang as usize].insert(shader);
             }
         }
     }
@@ -86,28 +83,31 @@ impl GenerateSources for CodegenData {
         let mut c = Context::default();
 
         let mut result = String::from("// GENERATED SOURCE FILE. DO NOT EDIT.\n");
-        for (lang, includes) in self.includes {
+
+        for lang in ShaderLanguage::ALL {
+            let includes: HashSet<&ShaderFile> = self.sources[lang as usize]
+                .union(&self.includes[lang as usize])
+                .collect();
+
+            if includes.is_empty() {
+                continue;
+            }
+
             result
                 .write_fmt(format_args!("\npub mod {} {{\n", lang.to_str()))
-                .expect("can't write mod header");
+                .expect("can't write module header");
             c.indent += 1;
+
             for include in includes {
                 result
                     .write_str(&include.to_static_statement(&mut c))
                     .expect("can't write static statements");
             }
+
             c.indent -= 1;
             result.write_str("}\n").expect("can't close module");
         }
 
         std::fs::write(&config.generated, result)
-    }
-}
-
-pub(crate) fn stage_name(stage: ShaderStage) -> &'static str {
-    match stage {
-        ShaderStage::Vertex => "VERT",
-        ShaderStage::Fragment => "FRAG",
-        ShaderStage::Compute => "COMP",
     }
 }

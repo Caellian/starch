@@ -1,5 +1,3 @@
-pub mod matcher;
-
 use crate::config::Config;
 use crate::shader::{Shader, ShaderCode};
 use regex::Regex;
