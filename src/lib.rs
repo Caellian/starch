@@ -7,6 +7,7 @@ pub(crate) mod util;
 
 pub mod prelude {
     pub use super::config::Config as StarchConfig;
+    pub use super::language::codegen::{CodegenData, GenerateSources};
     pub use super::language::transpile::*;
     pub use super::preprocess::preprocess_shader;
     pub use super::shader::*;
@@ -15,8 +16,6 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use super::prelude::*;
-    use crate::codegen::{CodegenData, GenerateSources};
-    use crate::config::Config;
     use log::LevelFilter;
 
     #[test]
@@ -25,7 +24,7 @@ mod tests {
             .filter_level(LevelFilter::Trace)
             .init();
 
-        let config = Config::init("./shaders");
+        let config = StarchConfig::init("../test");
 
         let shaders = Shader::load_shaders(&config);
         let result: CodegenData = shaders.transpile(&config).unwrap();

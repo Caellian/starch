@@ -18,7 +18,7 @@ fn format_static_statement(
     indent: usize,
 ) -> String {
     format!(
-        "{}pub static {}: &'static str = include_str!(\"{}\");\n",
+        "{}pub static {}: &'static str = include_str!(\"./{}\");\n",
         "    ".repeat(indent),
         name.as_ref(),
         value.as_ref().display(),
@@ -88,7 +88,7 @@ impl GenerateSources for CodegenData {
         let mut result = String::from("// GENERATED SOURCE FILE. DO NOT EDIT.\n");
         for (lang, includes) in self.includes {
             result
-                .write_fmt(format_args!("pub mod {} {{\n", lang.to_str()))
+                .write_fmt(format_args!("\npub mod {} {{\n", lang.to_str()))
                 .expect("can't write mod header");
             c.indent += 1;
             for include in includes {
@@ -97,7 +97,7 @@ impl GenerateSources for CodegenData {
                     .expect("can't write static statements");
             }
             c.indent -= 1;
-            result.write_str("\n}").expect("can't close module");
+            result.write_str("}\n").expect("can't close module");
         }
 
         std::fs::write(&config.generated, result)
