@@ -27,10 +27,10 @@ fn split_file_at_dot(file: &OsStr) -> (&OsStr, Option<&OsStr>) {
 }
 
 // TODO: Remove once path_file_prefix is stable.
-pub fn file_prefix<'a>(path: &'a Path) -> Option<&'a OsStr> {
+pub fn file_prefix(path: &Path) -> Option<&OsStr> {
     path.file_name()
         .map(split_file_at_dot)
-        .and_then(|(before, _after)| Some(before))
+        .map(|(before, _after)| before)
 }
 
 pub trait PathExt {
@@ -85,10 +85,10 @@ fn collect_files_impl<F: Fn(&Path) -> bool>(
         if let Ok(dir_entry) = entry_result {
             let sub_path = dir_entry.path();
 
-            if sub_path.is_dir() && (&filter)(&sub_path) {
+            if sub_path.is_dir() && (filter)(&sub_path) {
                 result.append(&mut collect_files_impl(root.as_ref(), &sub_path, filter));
                 continue;
-            } else if !sub_path.is_file() || !(&filter)(&sub_path) {
+            } else if !sub_path.is_file() || !(filter)(&sub_path) {
                 continue;
             }
 

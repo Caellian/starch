@@ -1,5 +1,5 @@
 use crate::prelude::ShaderLanguage;
-use naga::valid::{Capabilities, ValidationFlags};
+use naga::valid::{Capabilities, ValidationFlags, Validator};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
@@ -25,7 +25,7 @@ pub struct Config {
 fn env_var_list<K: AsRef<OsStr>>(key: K) -> Option<Vec<String>> {
     std::env::var(key)
         .ok()
-        .map(|it| it.split(",").map(|s| s.to_string()).collect())
+        .map(|it| it.split(',').map(|s| s.to_string()).collect())
 }
 
 macro_rules! path_field {
@@ -45,6 +45,7 @@ impl Default for Config {
 }
 
 impl Config {
+    #[allow(clippy::let_and_return)]
     pub fn init(root: impl AsRef<Path>) -> Config {
         #[cfg(feature = "config-file")]
         let local: Option<Config> =
@@ -59,43 +60,35 @@ impl Config {
         let targets = env_var_list("STARCH_SHADER_TARGETS")
             .map(|env| {
                 env.into_iter()
-                    .filter_map(|text| ShaderLanguage::from_str(&text))
+                    .filter_map(|text| ShaderLanguage::from_str(&text).ok())
                     .collect()
             })
-            .or(local.as_ref().map(|l| l.targets.clone()))
-            .unwrap_or(vec![
-                #[cfg(feature = "spv-out")]
-                ShaderLanguage::SPV,
-                #[cfg(feature = "glsl-out")]
-                ShaderLanguage::GLSL,
-                #[cfg(feature = "hlsl-out")]
-                ShaderLanguage::HLSL,
-                #[cfg(feature = "wgsl-out")]
-                ShaderLanguage::WGSL,
-                #[cfg(feature = "msl-out")]
-                ShaderLanguage::MSL,
-            ]);
+            .or_else(|| local.as_ref().map(|l| l.targets.clone()))
+            .unwrap_or_else(|| {
+                vec![
+                    #[cfg(feature = "spv-out")]
+                    ShaderLanguage::SPV,
+                    #[cfg(feature = "glsl-out")]
+                    ShaderLanguage::GLSL,
+                    #[cfg(feature = "hlsl-out")]
+                    ShaderLanguage::HLSL,
+                    #[cfg(feature = "wgsl-out")]
+                    ShaderLanguage::WGSL,
+                    #[cfg(feature = "msl-out")]
+                    ShaderLanguage::MSL,
+                ]
+            });
 
         let validation_flags = std::env::var("STARCH_SHADER_VALIDATION")
             .ok()
-            .and_then(|env| {
-                u8::from_str(&env)
-                    .ok()
-                    .map(|it| ValidationFlags::from_bits(it))
-                    .flatten()
-            })
-            .or(local.as_ref().map(|l| l.validation_flags))
+            .and_then(|env| u8::from_str(&env).ok().and_then(ValidationFlags::from_bits))
+            .or_else(|| local.as_ref().map(|l| l.validation_flags))
             .unwrap_or(ValidationFlags::all());
 
         let capabilities = std::env::var("STARCH_SHADER_CAPABILITIES")
             .ok()
-            .and_then(|env| {
-                u8::from_str(&env)
-                    .ok()
-                    .map(|it| Capabilities::from_bits(it))
-                    .flatten()
-            })
-            .or(local.as_ref().map(|l| l.capabilities))
+            .and_then(|env| u8::from_str(&env).ok().and_then(Capabilities::from_bits))
+            .or_else(|| local.as_ref().map(|l| l.capabilities))
             .unwrap_or(Capabilities::all());
 
         let result = Config {
@@ -147,6 +140,10 @@ impl Config {
 
         serde_yaml::to_writer(writer, self)
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
+    }
+
+    pub fn validator(&self) -> Validator {
+        Validator::new(self.validation_flags, self.capabilities)
     }
 
     pub fn out_relative(&self) -> &Path {

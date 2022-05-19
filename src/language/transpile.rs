@@ -1,15 +1,18 @@
 use crate::config::Config;
-use crate::error::TranspileError;
+use crate::error::{SourceError, TranspileError};
 use crate::language::codegen::CodegenData;
 use crate::shader::{Shader, ShaderCode};
 #[allow(unused_imports)]
 use crate::util::LogResult;
-use crate::util::Name;
+use crate::util::{file_prefix, Name};
 use naga::{EntryPoint, Module, ShaderStage};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
@@ -40,8 +43,7 @@ impl ShaderLanguage {
         let ext = path
             .as_ref()
             .extension()
-            .map(|os_str| os_str.to_str())
-            .flatten()?;
+            .and_then(|os_str| os_str.to_str())?;
 
         Some(match ext.to_ascii_lowercase().as_str() {
             #[cfg(feature = "wgsl-in")]
@@ -52,17 +54,6 @@ impl ShaderLanguage {
             }
             #[cfg(feature = "spv-in")]
             "spv" => ShaderLanguage::SPV,
-            _ => return None,
-        })
-    }
-
-    pub fn from_str(value: &str) -> Option<ShaderLanguage> {
-        Some(match value.to_ascii_lowercase().as_str() {
-            "wgsl" => ShaderLanguage::WGSL,
-            "glsl" => ShaderLanguage::GLSL,
-            "spv" => ShaderLanguage::SPV,
-            "hlsl" => ShaderLanguage::HLSL,
-            "msl" => ShaderLanguage::MSL,
             _ => return None,
         })
     }
@@ -126,13 +117,13 @@ impl ShaderLanguage {
         }
     }
 
-    pub fn parse<'a>(self, shader: &'a mut Shader) -> Option<&'a Module> {
+    pub fn parse(self, shader: &mut Shader) -> Result<&Module, SourceError> {
         if shader.module.is_some() {
-            return shader.module.as_ref();
+            return Ok(shader.module.as_ref().unwrap());
         }
 
-        let module = {
-            let source = shader.source.as_ref()?;
+        shader.module = Some({
+            let source = shader.source.as_ref().expect("no shader source");
 
             match self {
                 #[cfg(feature = "spv-in")]
@@ -140,52 +131,43 @@ impl ShaderLanguage {
                     use naga::front::spv;
 
                     let options = spv::Options::default();
-                    spv::parse_u8_slice(source.unwrap_binary(), &options).ok_or_log()
+                    spv::parse_u8_slice(source.unwrap_binary(), &options)?
                 }
                 #[cfg(feature = "wgsl-in")]
                 ShaderLanguage::WGSL => {
-                    naga::front::wgsl::parse_str(source.unwrap_text()).ok_or_log()
+                    naga::front::wgsl::parse_str(source.unwrap_text())?
                 }
                 #[cfg(feature = "glsl-in")]
                 ShaderLanguage::GLSL => {
                     use naga::front::glsl;
 
-                    let options = if let Some(stage) = shader.source_stage {
-                        glsl::Options {
-                            stage,
-                            defines: Default::default(),
-                        }
-                    } else {
-                        log::error!("unknown GLSL shader stage");
-                        return None;
+                    let stage = shader
+                        .source_stage
+                        .ok_or(TranspileError::UnhandledShaderStage)?;
+                    let options = glsl::Options {
+                        stage,
+                        defines: Default::default(),
                     };
 
                     let mut parser = glsl::Parser::default();
-                    match parser.parse(&options, source.unwrap_text()) {
-                        Ok(value) => Some(value),
-                        Err(errors) => {
-                            for error in errors {
-                                log::error!("{}", error);
-                            }
-                            None
-                        }
-                    }
-                }
-                _ => unimplemented!("transpilation target not implemented"),
-            }
-        };
 
-        shader.module = module;
-        shader.module.as_ref()
+                    parser.parse(&options, source.unwrap_text())?
+                }
+                _ => unimplemented!("parse target not implemented"),
+            }
+        });
+
+        Ok(shader.module.as_ref().expect("no module after parsing"))
     }
 
+    #[allow(unreachable_patterns)]
     pub fn generate<'a>(
         self,
         shader: &Shader,
         result: &mut ShaderCode,
         target: Option<&EntryPoint>,
     ) -> Result<(), TranspileError<'a>> {
-        Ok(match self {
+        match self {
             #[cfg(feature = "spv-out")]
             ShaderLanguage::SPV => {
                 use byteorder::{WriteBytesExt, LE};
@@ -273,8 +255,9 @@ impl ShaderLanguage {
                     &msl::PipelineOptions::default(),
                 )?;
             }
-            _ => Err(TranspileError::TargetNotSupported)?,
-        })
+            _ => return Err(TranspileError::TargetNotSupported),
+        }
+        Ok(())
     }
 }
 
@@ -284,34 +267,64 @@ impl Display for ShaderLanguage {
     }
 }
 
-#[derive(Debug)]
-pub struct ResultInFile {
-    pub language: ShaderLanguage,
-    pub path: PathBuf,
+impl FromStr for ShaderLanguage {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value.to_ascii_lowercase().as_str() {
+            "wgsl" => ShaderLanguage::WGSL,
+            "glsl" => ShaderLanguage::GLSL,
+            "spv" => ShaderLanguage::SPV,
+            "hlsl" => ShaderLanguage::HLSL,
+            "msl" => ShaderLanguage::MSL,
+            _ => return Err(()),
+        })
+    }
 }
 
-#[derive(Debug, Hash)]
+#[derive(Debug)]
 pub struct ShaderFile {
     pub language: ShaderLanguage,
     pub path: PathBuf,
     pub stage: Option<ShaderStage>,
 }
 
+impl ShaderFile {
+    pub fn name(&self) -> String {
+        let mut result = file_prefix(&self.path)
+            .and_then(|os_str| os_str.to_str())
+            .expect("invalid shader file name")
+            .to_ascii_uppercase()
+            .replace('.', "_");
+
+        if let Some(stage) = self.stage {
+            result.push_str(match stage {
+                ShaderStage::Vertex => "_VERT",
+                ShaderStage::Fragment => "_FRAG",
+                ShaderStage::Compute => "_COMP",
+            });
+        }
+
+        result
+    }
+}
+
 impl PartialEq for ShaderFile {
     fn eq(&self, other: &Self) -> bool {
-        let this_path = match self.path.canonicalize() {
-            Ok(it) => it,
-            Err(_) => return false,
-        };
-        let other_path = match other.path.canonicalize() {
-            Ok(it) => it,
-            Err(_) => return false,
-        };
-
-        this_path == other_path && self.stage != other.stage
+        self.path.eq(&other.path)
     }
 }
 impl Eq for ShaderFile {}
+impl PartialOrd for ShaderFile {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.path.partial_cmp(&other.path)
+    }
+}
+impl Ord for ShaderFile {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.path.cmp(&other.path)
+    }
+}
 
 pub trait Transpile {
     fn transpile_and_write<'a>(
@@ -357,7 +370,7 @@ impl Transpile for Shader {
                         let entry_point = &module.entry_points[0];
 
                         let transpiled =
-                            transpile_entry(self, Some(&entry_point), target)?;
+                            transpile_entry(self, Some(entry_point), target)?;
                         std::fs::write(
                             &config
                                 .out
@@ -487,7 +500,7 @@ impl Transpile for Vec<Shader> {
                         shader.path.display(),
                         err
                     );
-                    Err(err)?
+                    return Err(err);
                 }
             };
         }

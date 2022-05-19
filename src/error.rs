@@ -1,6 +1,21 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+pub enum SourceError {
+    #[cfg(feature = "wgsl-in")]
+    #[error(transparent)]
+    WGSLFront(#[from] naga::front::wgsl::ParseError),
+    #[cfg(feature = "glsl-in")]
+    #[error(transparent)]
+    GLSLFront(#[from] naga::front::glsl::ParseError),
+    #[cfg(feature = "spv-in")]
+    #[error(transparent)]
+    SPVFront(#[from] naga::front::spv::ParseError),
+    #[error("unable to validate source shader")]
+    Validation,
+}
+
+#[derive(Debug, Error)]
 pub enum TranspileError<'a> {
     #[error("shader has no entry point")]
     NoEntryPoint,
@@ -8,6 +23,8 @@ pub enum TranspileError<'a> {
     SourceNotSupported,
     #[error("requested transpilation target not supported")]
     TargetNotSupported,
+    #[error("unhandled shader stage")]
+    UnhandledShaderStage,
 
     #[cfg(feature = "wgsl-in")]
     #[error("{0:?}")]
@@ -34,6 +51,8 @@ pub enum TranspileError<'a> {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Parse(#[from] SourceError),
 
     #[cfg(not(feature = "wgsl-in"))]
     #[error("")]

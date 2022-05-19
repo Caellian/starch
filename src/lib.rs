@@ -7,7 +7,8 @@ pub(crate) mod util;
 
 pub mod prelude {
     pub use super::config::Config as StarchConfig;
-    pub use super::language::codegen::{CodegenData, GenerateSources};
+    pub use super::error::*;
+    pub use super::language::codegen::CodegenData;
     pub use super::language::transpile::*;
     pub use super::preprocess::preprocess_shader;
     pub use super::shader::*;
@@ -26,7 +27,8 @@ mod tests {
 
         let config = StarchConfig::init("../test");
 
-        let shaders = Shader::load_shaders(&config);
+        let shaders = Shader::load_shaders(&config)
+            .expect("couldn't parse and validate source shaders");
         let result: CodegenData = shaders
             .transpile_and_write(&config)
             .expect("couldn't transpile");

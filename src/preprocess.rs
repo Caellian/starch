@@ -11,7 +11,7 @@ lazy_static::lazy_static! {
     };
 }
 
-fn proc_includes(buffer: &mut String, _config: &Config) {
+fn proc_includes(buffer: &mut str, _config: &Config) {
     let mut includes: Vec<(usize, usize)> = vec![];
 
     while INCLUDE_MACRO.find(buffer).is_some() {

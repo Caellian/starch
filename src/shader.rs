@@ -1,8 +1,9 @@
 use crate::config::Config;
+use crate::error::SourceError;
 use crate::prelude::ShaderLanguage;
 use crate::preprocess;
 use crate::util::{collect_files, PathExt};
-use naga::valid::{ModuleInfo, Validator};
+use naga::valid::ModuleInfo;
 use naga::{Module, ShaderStage};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -49,14 +50,12 @@ impl Write for ShaderCode {
 
 impl std::fmt::Write for ShaderCode {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        Ok(match self {
-            ShaderCode::Text(text) => {
-                text.push_str(s);
-            }
+        match self {
+            ShaderCode::Text(text) => text.write_str(s),
             ShaderCode::Binary(bin) => {
-                bin.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)?;
+                bin.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
             }
-        })
+        }
     }
 }
 
@@ -150,37 +149,35 @@ impl Shader {
             }
         })
         .into_iter()
-        .filter_map(|path| Shader::new(path))
+        .filter_map(Shader::new)
         .collect()
     }
 
-    pub fn load_shaders(config: &Config) -> Vec<Shader> {
-        Shader::collect(&config)
+    pub fn load_shaders(config: &Config) -> Result<Vec<Shader>, SourceError> {
+        let mut result: Vec<Shader> = Shader::collect(config)
             .into_iter()
             .map(|mut shader| {
                 preprocess::preprocess_shader(&mut shader, config);
                 shader
             })
-            .filter_map(|mut shader| {
-                if shader.parse().is_some() {
-                    Some(shader)
-                } else {
-                    log::warn!("Couldn't parse: {}", shader.path.display());
-                    None
+            .collect();
+
+        let mut validator = config.validator();
+
+        for shader in &mut result {
+            shader.parse()?;
+
+            shader.module_info = match validator.validate(shader.module.as_ref().unwrap())
+            {
+                Ok(info) => Some(info),
+                Err(err) => {
+                    log::error!("{}", err);
+                    return Err(SourceError::Validation);
                 }
-            })
-            .filter_map(|mut shader| {
-                if shader.validate(config).is_some() {
-                    Some(shader)
-                } else {
-                    log::warn!(
-                        "{} didn't pass validation; not transpiling.",
-                        shader.path.display()
-                    );
-                    None
-                }
-            })
-            .collect()
+            };
+        }
+
+        Ok(result)
     }
 
     pub fn read(&mut self) -> Option<&ShaderCode> {
@@ -189,9 +186,9 @@ impl Shader {
         }
 
         let read_result = if self.lang.is_binary() {
-            std::fs::read(&self.path).map(|value| ShaderCode::Binary(value))
+            std::fs::read(&self.path).map(ShaderCode::Binary)
         } else {
-            std::fs::read_to_string(&self.path).map(|value| ShaderCode::Text(value))
+            std::fs::read_to_string(&self.path).map(ShaderCode::Text)
         };
 
         match read_result {
@@ -206,23 +203,8 @@ impl Shader {
         self.source.as_ref()
     }
 
-    pub fn parse(&mut self) -> Option<&Module> {
-        self.lang.clone().parse(self)
-    }
-
-    pub fn validate(&mut self, config: &Config) -> Option<&ModuleInfo> {
-        let mut validator = Validator::new(config.validation_flags, config.capabilities);
-
-        let result = validator.validate(self.module.as_ref()?);
-        self.module_info = match result {
-            Ok(info) => Some(info),
-            Err(err) => {
-                log::error!("{}", err);
-                None
-            }
-        };
-
-        self.module_info.as_ref()
+    pub fn parse(&mut self) -> Result<&Module, SourceError> {
+        self.lang.parse(self)
     }
 }
 
