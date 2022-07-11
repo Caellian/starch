@@ -5,7 +5,9 @@ pub mod preprocess;
 pub mod shader;
 pub(crate) mod util;
 
-pub mod prelude {
+pub mod prelude {}
+
+pub mod prelude_build {
     pub use super::config::Config as StarchConfig;
     pub use super::error::*;
     pub use super::language::codegen::CodegenData;
@@ -16,7 +18,7 @@ pub mod prelude {
 
 #[cfg(test)]
 mod tests {
-    use super::prelude::*;
+    use super::prelude_build::*;
     use log::LevelFilter;
 
     #[test]
@@ -25,7 +27,7 @@ mod tests {
             .filter_level(LevelFilter::Trace)
             .init();
 
-        let config = StarchConfig::init("../test");
+        let config = StarchConfig::init("./test/");
 
         let shaders = Shader::load_shaders(&config)
             .expect("couldn't parse and validate source shaders");

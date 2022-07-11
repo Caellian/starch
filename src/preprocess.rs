@@ -6,7 +6,7 @@ use std::path::PathBuf;
 lazy_static::lazy_static! {
     pub static ref INCLUDE_MACRO: Regex = {
         let path_str = r"((\.|\.\.|[\w\d\-_\.]+)((\\|/)(\.\.|[\w\d\-_\.]+))*)";
-        let expected = format!("use\\s+('({0})'|\"({0})\")", path_str);
+        let expected = format!("@starch::include \\s+('({0})'|\"({0})\")", path_str);
         Regex::new(&expected).unwrap()
     };
 }
@@ -34,7 +34,7 @@ pub fn preprocess_shader<'a>(
 
     match &mut result {
         ShaderCode::Text(value) => {
-            proc_includes(value, config);
+            //proc_includes(value, config);
         }
         ShaderCode::Binary(_) => {}
     }

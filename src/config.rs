@@ -1,4 +1,4 @@
-use crate::prelude::ShaderLanguage;
+use crate::prelude_build::ShaderLanguage;
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ macro_rules! path_field {
             .ok()
             .map(|value| PathBuf::from(value))
             .or($source.as_ref().map(|c: &Config| c.$field.clone()))
-            .unwrap_or($root.as_ref().join($default));
+            .unwrap_or($root.as_ref().join("src").join($default));
     };
 }
 
@@ -53,9 +53,9 @@ impl Config {
         #[cfg(not(feature = "config-file"))]
         let local: Option<Config> = None;
 
-        path_field!(src, local, "STARCH_SHADER_SRC", root, "src/");
-        path_field!(out, local, "STARCH_SHADER_OUT", root, "src/gen/");
-        path_field!(generated, local, "STARCH_SHADER_GEN", root, "src/lib.rs");
+        path_field!(src, local, "STARCH_SHADER_SRC", root, "");
+        path_field!(out, local, "STARCH_SHADER_OUT", root, "gen");
+        path_field!(generated, local, "STARCH_SHADER_GEN", root, "lib.rs");
 
         let targets = env_var_list("STARCH_SHADER_TARGETS")
             .map(|env| {

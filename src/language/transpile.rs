@@ -1,10 +1,11 @@
 use crate::config::Config;
-use crate::error::{SourceError, TranspileError};
+use crate::error::{SourceError, TranspileError, VecErr};
 use crate::language::codegen::CodegenData;
 use crate::shader::{Shader, ShaderCode};
 #[allow(unused_imports)]
 use crate::util::LogResult;
 use crate::util::{file_prefix, Name};
+use naga::proc::BoundsCheckPolicies;
 use naga::{EntryPoint, Module, ShaderStage};
 #[cfg(feature = "config-file")]
 use serde::{Deserialize, Serialize};
@@ -143,7 +144,7 @@ impl ShaderLanguage {
 
                     let stage = shader
                         .source_stage
-                        .ok_or(TranspileError::UnhandledShaderStage)?;
+                        .ok_or(SourceError::UnhandledShaderStage)?;
                     let options = glsl::Options {
                         stage,
                         defines: Default::default(),
@@ -151,7 +152,9 @@ impl ShaderLanguage {
 
                     let mut parser = glsl::Parser::default();
 
-                    parser.parse(&options, source.unwrap_text())?
+                    parser
+                        .parse(&options, source.unwrap_text())
+                        .map_err(|e| VecErr::from(e))?
                 }
                 _ => unimplemented!("parse target not implemented"),
             }
@@ -204,7 +207,20 @@ impl ShaderLanguage {
 
                 let target = target.ok_or(TranspileError::NoEntryPoint)?;
 
-                let options = glsl::Options::default();
+                #[cfg(not(feature = "web-glsl-out"))]
+                let options = glsl::Options {
+                    version: glsl::Version::Desktop(430),
+                    ..Default::default()
+                };
+                #[cfg(feature = "web-glsl-out")]
+                let options = glsl::Options {
+                    version: glsl::Version::Embedded {
+                        version: 300,
+                        is_webgl: true,
+                    },
+                    ..Default::default()
+                };
+
                 let pipeline_options = glsl::PipelineOptions {
                     shader_stage: target.stage,
                     entry_point: target
@@ -212,6 +228,7 @@ impl ShaderLanguage {
                         .name
                         .clone()
                         .ok_or(TranspileError::NoEntryPoint)?,
+                    multiview: None,
                 };
 
                 let mut writer = glsl::Writer::new(
@@ -220,6 +237,7 @@ impl ShaderLanguage {
                     shader.module_info.as_ref().expect("no module info"),
                     &options,
                     &pipeline_options,
+                    BoundsCheckPolicies::default(),
                 )?;
                 writer.write()?;
             }
@@ -496,7 +514,7 @@ impl Transpile for Vec<Shader> {
                 Ok(data) => result += data,
                 Err(err) => {
                     log::error!(
-                        "Encountered errors while transpiling: {}\n{}",
+                        "Encountered errors while transpiling: {}\n{:#?}",
                         shader.path.display(),
                         err
                     );

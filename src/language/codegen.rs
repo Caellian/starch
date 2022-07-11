@@ -1,5 +1,6 @@
 use crate::config::Config;
-use crate::prelude::{ShaderFile, ShaderLanguage};
+use crate::prelude_build::{ShaderFile, ShaderLanguage};
+use path_slash::PathExt as _;
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Write};
 use std::io::Error;
@@ -17,10 +18,11 @@ fn format_static_statement(
     indent: usize,
 ) -> String {
     format!(
-        "{}pub static {}: &'static str = include_str!(\"./{}\");\n",
+        "{}pub static {}: &'static str = include_str!(\"{}\");\n",
         "    ".repeat(indent),
         name.as_ref(),
-        value.as_ref().display(),
+        // Rust handles fw slash paths properly on windows
+        value.as_ref().to_slash().unwrap(),
     )
 }
 
@@ -53,23 +55,19 @@ impl CodegenData {
                 continue;
             }
 
-            result
-                .write_fmt(format_args!("\npub mod {} {{\n", lang.to_str()))
-                .expect("can't write module header");
+            let _ = result.write_fmt(format_args!("\npub mod {} {{\n", lang.to_str()));
             c.indent += 1;
 
             for include in includes {
-                result
-                    .write_str(&format_static_statement(
-                        include.name(),
-                        &include.path,
-                        c.indent,
-                    ))
-                    .expect("can't write static statements");
+                let _ = result.write_str(&format_static_statement(
+                    include.name(),
+                    &include.path,
+                    c.indent,
+                ));
             }
 
             c.indent -= 1;
-            result.write_str("}\n").expect("can't close module");
+            let _ = result.write_str("}\n");
         }
 
         std::fs::write(&config.generated, result)

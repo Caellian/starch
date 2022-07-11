@@ -1,8 +1,9 @@
 use crate::config::Config;
 use crate::error::SourceError;
-use crate::prelude::ShaderLanguage;
+use crate::prelude_build::ShaderLanguage;
 use crate::preprocess;
 use crate::util::{collect_files, PathExt};
+use log::error;
 use naga::valid::ModuleInfo;
 use naga::{Module, ShaderStage};
 use std::io::Write;
@@ -164,15 +165,37 @@ impl Shader {
 
         let mut validator = config.validator();
 
+        log::trace!("Working in: {}", std::env::current_dir().unwrap().display());
         for shader in &mut result {
-            shader.parse()?;
+            let path_display = shader.path.as_os_str().to_string_lossy().to_string();
+            log::debug!("Parsing: {}", &path_display);
+            if let Err(err) = shader.parse() {
+                match &err {
+                    #[cfg(feature = "wgsl-in")]
+                    SourceError::WGSLParse(e) => {
+                        let location = e
+                            .location(shader.source.as_ref().unwrap().unwrap_text())
+                            .unwrap();
+                        log::error!(
+                            "{}:{}:{}: {}",
+                            shader.path.display(),
+                            location.line_number,
+                            location.line_position,
+                            e.message()
+                        );
+                    }
+                    _ => unreachable!(""),
+                }
+                return Err(err);
+            }
 
+            log::debug!("Validating: {}", &path_display);
             shader.module_info = match validator.validate(shader.module.as_ref().unwrap())
             {
                 Ok(info) => Some(info),
                 Err(err) => {
                     log::error!("{}", err);
-                    return Err(SourceError::Validation);
+                    return Err(SourceError::Validation(shader.path.clone()));
                 }
             };
         }
